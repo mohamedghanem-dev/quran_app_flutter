@@ -1,0 +1,110 @@
+name: 🕌 Build Quran APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+
+    steps:
+      # ─── 1. Checkout ───────────────────────────────────────────
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      # ─── 2. Java 17 ────────────────────────────────────────────
+      - name: ☕ Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # ─── 3. Flutter ────────────────────────────────────────────
+      - name: 🐦 Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+          cache: true
+
+      # ─── 4. Cache pub packages ─────────────────────────────────
+      - name: 📦 Cache pub dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            ${{ env.PUB_CACHE }}
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      # ─── 5. Get dependencies ───────────────────────────────────
+      - name: 📲 Get Flutter dependencies
+        run: flutter pub get
+
+      # ─── 6. Download Hafs font ─────────────────────────────────
+      - name: 🔤 Download Hafs Quran font
+        run: |
+          mkdir -p assets/fonts
+          curl -L -o assets/fonts/hafs.ttf \
+            "https://github.com/almufarrij/quranic-font/raw/master/fonts/KFGQPC%20Uthmanic%20Script%20HAFS.ttf" \
+            || curl -L -o assets/fonts/hafs.ttf \
+            "https://raw.githubusercontent.com/khaledhosny/amiri/main/fonts/ttf/Amiri-Regular.ttf"
+
+      # ─── 7. Generate launcher icons ────────────────────────────
+      - name: 🖼️ Generate launcher icons
+        run: flutter pub run flutter_launcher_icons
+        continue-on-error: true
+
+      # ─── 8. Analyze (non-blocking) ─────────────────────────────
+      - name: 🔍 Analyze code
+        run: flutter analyze --no-fatal-infos
+        continue-on-error: true
+
+      # ─── 9. Build APK ──────────────────────────────────────────
+      - name: 🔨 Build release APK
+        run: flutter build apk --release --no-shrink
+
+      # ─── 10. Rename APK with version ───────────────────────────
+      - name: 📝 Rename APK
+        run: |
+          DATE=$(date +'%Y%m%d-%H%M')
+          cp build/app/outputs/flutter-apk/app-release.apk \
+             build/app/outputs/flutter-apk/quran-app-v1.0-${DATE}.apk
+
+      # ─── 11. Upload APK artifact ───────────────────────────────
+      - name: 📤 Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: quran-apk-${{ github.run_number }}
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/flutter-apk/quran-app-*.apk
+          retention-days: 30
+
+      # ─── 12. Create Release on tag ─────────────────────────────
+      - name: 🚀 Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/app/outputs/flutter-apk/app-release.apk
+          name: القرآن الكريم ${{ github.ref_name }}
+          body: |
+            ## 🕌 القرآن الكريم - نسخة ${{ github.ref_name }}
+            
+            ### المميزات:
+            - 📖 القرآن الكريم كامل (١١٤ سورة) بخط حفص
+            - 🤲 أذكار الصباح والمساء والنوم والصلاة
+            - 📿 سبحة إلكترونية مع حفظ الإجمالي
+            - 🔍 بحث في السور والأذكار
+            - 📵 يعمل بدون إنترنت (بعد تحميل السور)
+            
+            ### تحميل:
+            ⬇️ `app-release.apk` أدناه
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
